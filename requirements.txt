@@ -1,5 +1,4 @@
 pandas
-glob
 os 
 matplotlib
 flask==2.3.2
