@@ -1,4 +1,3 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
@@ -9,13 +8,14 @@ from sklearn.preprocessing import StandardScaler
 import requests
 import joblib
 import glob
+import os
 from datetime import datetime
 
 # Configuration
 WEATHER_API_KEY = "18a9e977d32e4a7a8e961308252106"
 LOCATION = "Pune"
 MODEL_PATH = "oven_time_predictor.pkl"
-CSV_PATH = "data/*.CSV"  # ✅ Updated for Streamlit Cloud
+CSV_PATH = "D:/IndustrialOvenHeatUpPrediction/Research Data CED OVEN/*.CSV"
 
 COLUMNS = [
     'Date', 'Time',
@@ -51,6 +51,7 @@ def prepare_training_data(csv_files):
             df = pd.read_csv(file, delimiter='\t', encoding='utf-16')
             missing_cols = [col for col in COLUMNS if col not in df.columns]
             if missing_cols:
+                print(f"⚠️ Missing columns in {file}: {missing_cols}")
                 continue
             df['DateTime'] = pd.to_datetime(
                 df['Date'] + ' ' + df['Time'],
@@ -73,7 +74,8 @@ def prepare_training_data(csv_files):
                         }))
                     except IndexError:
                         continue
-        except:
+        except Exception as e:
+            print(f"❌ Error processing {file}: {str(e)}")
             continue
     return pd.concat(dfs) if dfs else pd.DataFrame()
 
@@ -104,7 +106,10 @@ def train_model(features):
         ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
     ])
     model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    print(f"✅ Model trained. MAE: {mean_absolute_error(y_test, preds):.2f} minutes")
     joblib.dump((model, feature_names), MODEL_PATH)
+    print(f"✅ Model saved to: {MODEL_PATH}")
     return model, feature_names
 
 def predict_heating_time(sensor, current_temp):
@@ -125,20 +130,25 @@ def predict_heating_time(sensor, current_temp):
     input_data[f'sensor_{sensor}'] = 1
     return model.predict(input_data[features])[0]
 
-# Streamlit UI
-st.title("🔥 Industrial Oven Heat-Up Predictor")
-
-current_temp = st.number_input("Enter current oven temperature (°C)", min_value=0.0, step=1.0)
-sensor = st.selectbox("Select sensor", list(SENSOR_TARGETS.keys()))
-
-if st.button("Train & Predict"):
+# Main Execution
+if __name__ == "__main__":
     csv_files = glob.glob(CSV_PATH)
+    print(f"📁 Found {len(csv_files)} CSV files")
     oven_data = prepare_training_data(csv_files)
-    features_df = create_features(oven_data)
-
-    if not features_df.empty:
-        model, feature_names = train_model(features_df)
-        prediction = predict_heating_time(sensor, current_temp)
-        st.success(f"Predicted time to target: {prediction + 10:.1f} minutes")
+    features = create_features(oven_data)
+    if not features.empty:
+        model, feature_names = train_model(features)
     else:
-        st.error("❌ No valid training data found. Please check your CSV files.")
+        raise ValueError("❌ No valid training data could be processed")
+
+    try:
+        current_oven_temp = float(input("🌡️ Enter current oven temperature (°C): "))
+        sensor_type = input("🔧 Enter sensor (WU311/WU312/WU314/WU321/WU322/WU323): ").strip().upper()
+        if sensor_type not in SENSOR_TARGETS:
+            raise ValueError("❌ Invalid sensor type")
+        prediction = predict_heating_time(sensor=sensor_type, current_temp=current_oven_temp)
+        weather = get_weather()
+        print(f"\n⏱️ Predicted time to target: {prediction + 10:.1f} minutes")
+        print(f"🌦️ Current weather in {LOCATION}: {weather['temp']}°C, {weather['humidity']}% humidity")
+    except Exception as e:
+        print(f"❌ Prediction error: {str(e)}")
